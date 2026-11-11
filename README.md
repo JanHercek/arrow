@@ -117,7 +117,7 @@ $ python3 arrow.py a=0.05               # launch angle -> distance
 angle 0.05 rad -> distance 101.224 m
 crossing [-]   = 2 (falling crossing)
 
-$ python3 arrow.py d=612                # the far limit of a MAG340 arrow
+$ python3 arrow.py d=612                # near the far end of what the default arrow carries
 distance 612.0 m -> angle 0.63208 rad
 hit_time [s]   = 10.639
 
@@ -150,7 +150,7 @@ answer and a `note:` line saying what you asked for and why it is not what you g
 ```
 $ ./arrow.py
 arrow.py(3.1.0):
-Angle[rad]=(-pi/2,+pi/2)  Distance[m]=(+0.01,+612)
+Angle[rad]=(-pi/2,+pi/2)  Distance[m]=(+0.01,+617.732)
 Segments=0|1|2|3 (0=auto, 3=lofted)  archer_aLt[m]  Wind[m/s, + = tail]  Q=Quit
 enter : [a=_] [d=_] [s=_] [l=_] [w=_] [h] [q] <Enter>
 enter : d=50 l=-50
@@ -169,7 +169,7 @@ output: launch angle [rad]   = 0.8103
         apex [m]             = 0.000
 
 arrow.py(3.1.0):
-Angle[rad]=(-pi/2,+pi/2)  Distance[m]=(+0.01,+612)
+Angle[rad]=(-pi/2,+pi/2)  Distance[m]=(+0.01,+617.732)
 Segments=0|1|2|3 (0=auto, 3=lofted)  archer_aLt[m]  Wind[m/s, + = tail]  Q=Quit
 enter : [a=_] [d=_] [s=_] [l=_] [w=_] [h] [q] <Enter>
 enter : q
@@ -203,7 +203,7 @@ arr.archer_alt = 12.0         # archer 12 m above the target
 print(arr.get_angle(200.0))
 
 try:
-    arr.get_angle(700.0)      # past the model's question range (max_dist = 612 m)
+    arr.get_angle(700.0)      # past what this arrow can carry at these settings
 except Unreachable as err:
     print(err)
 ```
@@ -212,7 +212,7 @@ except Unreachable as err:
 0.04489 rad = 2.572 deg
 impact 94.2 m/s, 100.6 J, 0.93 s, apex 1.04 m
 0.044151892867459026
-in get_angle: target_distance=700.0
+in get_angle: 700 m is past the limit 657.3 m (this arrow carries at most 657.3 m at these settings; the nearest question the model takes is 0.01 m)
 ```
 
 ---
@@ -337,8 +337,8 @@ both crossings are searched, because a tailwind shifts the ground frame. Asking 
 crossing costs both solves, about 35 ms for the high shot at 120 m — the price of being told what
 the alternative was.)
 
-Every distance the model accepts is hittable: **1224 distances from `min_dist` to `max_dist`,
-stepped by 0.5 m, were asked of the auto solver and every one of them was hit**, the worst landing
+Every distance worth asking is hittable: **1224 distances from `min_dist` to 612 m, stepped by
+0.5 m, were asked of the auto solver and every one of them was hit**, the worst landing
 error 0.027 m against the model's own acceptance of 0.05 m, slowest call 10.5 ms. The same sweep was
 then run over `segments = 0`, `1` and `2` — 243 shots across nine archer altitudes — and every
 angle handed back was checked against the independent RK4 march on the crossing that answered:
@@ -506,8 +506,8 @@ standard configuration of a **MAG340** crossbow with 350 grain arrows.
 | `archer_alt` | 0.0 | m | archer's altitude relative to the target |
 | `ar_launch_alt` | -0.025 | m | arrow height above the sight line at launch (eye-to-arrow) |
 | `segments` | 0 | – | which shot you want out of the ones that hit: 0 = auto (the faster route), 1 = rising, 2 = falling, 3 = lofted (`steepest_angle`, the steep twin of the flat shot); a crossing that cannot reach falls back to the other and says so in `note` |
-| `min_dist` | 0.01 | m | below this, questions are refused |
-| `max_dist` | 612.0 | m | above this, questions are refused |
+| `min_dist` | 0.01 | m | below this, questions are refused: the model has nothing to say that precisely |
+| `max_dist` | derived | m | above this, questions are refused. It is `max_range()` — the farthest this arrow, at these settings, can carry — not a number written down: 617.7 m for the default MAG340, 1091 m for a slicker `drag_coef`, 666 m with an 8 m/s tailwind. Set a number to impose a smaller ceiling, `None` to derive again |
 
 The frontal area used for drag is the shaft disc plus `ar_vane_n * ar_vane_height *
 ar_vane_thick`, so `k` (and with it the terminal speed) responds to a vane change as it should.
@@ -582,15 +582,17 @@ Unreachable: in get_angle: 0.01 m cannot be hit at archer_alt -200.0 m: the risi
              1.5707514173185602); the falling crossing needs an angle the model will not fly (...)
 Unreachable: in get_angle: 650.0 m cannot be hit at archer_alt 0.0 m: the rising crossing cannot
              get that far; the falling crossing never gets back to the sight line at any angle
-Unreachable: in get_angle: target_distance=700.0               # outside min_dist..max_dist
-BadInput:    segments must be 0 (auto), 1 or 2, got 3
+Unreachable: in get_angle: 700 m is past the limit 617.7 m (this arrow carries at most 617.7 m at
+             these settings; the nearest question the model takes is 0.01 m)
+BadInput:    segments must be 0 (auto), 1 (rising), 2 (falling) or 3 (lofted), got 4
 BadInput:    wind 400.0 m/s is at or beyond the launch speed 103.632 m/s: no angle gets the arrow
              forward
 BadInput:    headwind 100.0 m/s beats the arrow at angle 1.50000 rad   # a forward call's own angle
 BadInput:    ar_mass, gravity_accel and ar_launch_velo must be positive
 ```
 
-A distance outside `min_dist..max_dist` is a setup error, so the message reports the value. A
+A distance outside `min_dist..max_dist` names the limit and what the arrow can carry at these
+settings, because `target_distance=700.0` told an archer nothing about what to ask instead. A
 distance inside it that cannot be hit reports what each crossing managed — "got no closer to it
 than 7.4 m", or "never gets back to the sight line at any angle" — rather than the `-1.0 m` the
 search uses internally for "not a distance", and it is raised only when *both* crossings have
@@ -607,12 +609,16 @@ fly") instead of an unhittable target escaping as a setup error.
 ### What is reachable
 
 `min_dist`/`max_dist` are the range of the *question*, not a promise that the answer exists —
-but with `segments = 0` the promise holds over the whole range: every one of the 1224 distances
-from 0.01 m to 612 m, stepped by 0.5 m, was hit, the worst landing error 0.027 m against
+but with `segments = 0` the promise holds over everything worth asking: every one of the 1224
+distances from 0.01 m to 612 m, stepped by 0.5 m, was hit, the worst landing error 0.027 m against
 `DIST_ACCURACY = 0.05 m`. Force a single crossing and refusals appear: the falling crossing
 refuses below **7.4 m** (`the falling crossing got no closer to it than 7.4 m at 0.0068 rad`),
-the rising one refuses above it. The model's own physical ceiling from level ground is 617.73 m
-at 0.7084 rad, so `max_dist = 612` sits just inside it. For a target above the archer the auto
+the rising one refuses above it. The model's own ceiling from level ground is 617.73 m at 0.7084
+rad and **`max_dist` is that number** — it is derived from the model, no longer written down, so
+the arrow you configure moves it. Between 612 m and that ceiling the range-angle curve is at its
+flattest and the angle search can no longer verify a landing inside `DIST_ACCURACY`: those
+questions are answered by a refusal from the search, which says which crossing failed, rather than
+by a limit that quietly hides them. For a target above the archer the auto
 search offers the practical shot and the plunging one is one attribute away: for a target 50 m up
 at 120 m the model answers 0.456972 rad rising and 1.468337 rad falling — the same distance, two
 different shots.
@@ -688,8 +694,9 @@ Honest limits of the equations being solved:
 - **Flat target line.** The sight line is the horizontal plane through the archer's eye
   (`y = 0`), with the arrow released `ar_launch_alt` below it. No target size, no aiming
   point offset, no target face geometry: an "x" is a point.
-- **Range validity is your data's range.** `max_dist = 612 m` is what the default MAG340 arrow
-  can reach, not a statement that `Cd = 0.4` is right at 600 m. Calibrate before trusting
+- **Range validity is your data's range.** `max_dist` follows the arrow you configure — 617.7 m
+  for the default MAG340, 1091 m with a slicker `drag_coef` — which is a statement about this
+  model, not that `Cd = 0.4` is right at 600 m. Calibrate before trusting
   anything at the far end, and treat the numbers as a good model rather than a measurement —
   the spread between individual arrows and across a string's serving is larger than the
   numerical error.
@@ -770,7 +777,7 @@ gives 617.732 m at 0.7084 rad, and `max_range()` gives 617.732 m.
 
 ```
 $ python3 arrow_test.py
-Ran 37 tests in 6.975s
+Ran 44 tests in 10.6s
 
 OK
 ```
@@ -842,6 +849,18 @@ code rather than about archery.
   `note` with what the lofted shot costs beside the flat route's angle and time. Below about
   0.12 m there is nothing to find and the refusal says so. See
   [Shooting over a wall](#shooting-over-a-wall).
+- **`max_dist` is derived from the model, not written down.** It was `612.`, a number noted for the
+  default MAG340 arrow, and it became a lie the moment anyone changed the arrow: a slicker
+  `drag_coef` carries 1091 m in this model and the constant refused 700 m it could hit with room to
+  spare — reachable through `calibrate()`, a documented feature. The limit is `max_range()` itself
+  now (617.7 m by default, 666 m with an 8 m/s tailwind, 1091 m for the slick arrow), it stops
+  caring which crossing `segments` is asking for, and it is remembered against the twelve settings
+  that move a trajectory — so a question costs nothing extra (1.6 ms before and after; deriving
+  costs 16 ms and happens once per setup, not twice per question, which the read-back's own writes
+  would otherwise cause). Refusals name both numbers now: `700 m is past the limit 617.7 m (this
+  arrow carries at most 617.7 m at these settings …)` instead of `target_distance=700.0`. Where the
+  model cannot bring an arrow back to the sight line at all, the limit is `inf` rather than the
+  search's `-1.` marker, so the search keeps the sentence that explains the setup.
 - **AGPL-3.0-or-later**, canonical text in `LICENSE`, SPDX line in both Python files.
 - **The read-back is renamed, because `final_*` was lying.** `final_x` and `final_t` were filled at
   whatever point the call had been asked about — asking how high the arrow is at 120 m on a shot

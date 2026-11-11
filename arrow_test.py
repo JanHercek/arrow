@@ -264,6 +264,7 @@ class ArrowTestCases(unittest.TestCase):
         self.assertEqual(imports, ["math", "sys", "typing"],
                          "the header promises nothing outside the standard library")
         funcs: dict[str, ast.FunctionDef] = {}
+        overloads: dict[str, list[ast.FunctionDef]] = {}
         bound: dict[str, set[str]] = {}
         for fn in [x for x in ast.walk(tree) if isinstance(x, ast.FunctionDef)]:
             names: set[str] = ({a.arg for a in fn.args.args}
@@ -277,16 +278,21 @@ class ArrowTestCases(unittest.TestCase):
                     names.add(node.arg)
                 elif isinstance(node, ast.ExceptHandler) and node.name:
                     names.add(node.name)
-            funcs[fn.name], bound[fn.name] = fn, names
+            funcs[fn.name], bound[fn.name] = fn, names | bound.get(fn.name, set())
+            overloads.setdefault(fn.name, []).append(fn)
         edges: dict[str, set[str]] = {}
-        for name, fn in funcs.items():
+        for name, fns in overloads.items():
+            # every definition of a name counts: a property is two functions under one name, and
+            # reading only the last of them would hide the getter's calls - which is where the
+            # derived max_dist reaches for max_range()
             called: set[str] = set()
-            for call in ast.walk(fn):
-                if isinstance(call, ast.Call):
-                    if isinstance(call.func, ast.Attribute):
-                        called.add(call.func.attr)
-                    elif isinstance(call.func, ast.Name) and call.func.id not in bound[name]:
-                        called.add(call.func.id)
+            for fn in fns:
+                for call in ast.walk(fn):
+                    if isinstance(call, ast.Call):
+                        if isinstance(call.func, ast.Attribute):
+                            called.add(call.func.attr)
+                        elif isinstance(call.func, ast.Name) and call.func.id not in bound[name]:
+                            called.add(call.func.id)
             edges[name] = {c for c in called if c in funcs and c != name}
         state: dict[str, int] = {}
         cycles: list[list[str]] = []
@@ -337,6 +343,106 @@ class ArrowTestCases(unittest.TestCase):
             self.assertRaises(arrow.BadInput, arw.get_horizontal_distance, 1.6)
             self.assertRaises(arrow.Unreachable, arw.get_angle, 0.)
             self.assertRaises(arrow.Unreachable, arw.get_angle, 900.)
+
+    def test_the_far_limit_is_the_model_s_own_and_not_a_constant(self) -> None:
+        '''`max_dist` used to be 612., a number written down for one arrow on one day. It is now
+        whatever this setup can carry, and a test that merely re-read 612 would not notice it
+        rotting, so this one asks the model instead.'''
+        arw: arrow.Arrow = arrow.Arrow()
+        self.assertAlmostEqual(arw.max_dist, arw.max_range(), places=6)
+        self.assertGreater(arw.max_dist, 612., "the constant sat below the model's own maximum")
+        self.assertEqual(arw._far_key, tuple(getattr(arw, name) for name in arrow.FAR_STAMP),
+                         "the remembered limit is keyed to the settings it was derived at")
+
+    def test_the_far_limit_follows_the_arrow_and_the_wind(self) -> None:
+        '''The bug the constant carried: a slicker arrow carries 1091 m in this model, and 612.
+        refused 700 m it could hit with room to spare - through calibrate(), a documented feature.
+        Anything that moves a trajectory has to move the limit.'''
+        slick: arrow.Arrow = arrow.Arrow()
+        slick.drag_coef = 1.4e-3
+        self.assertGreater(slick.max_dist, 1000.)
+        for distance in (700., 800., 1000.):
+            with self.subTest(distance=distance):
+                angle: float = slick.get_angle(distance)
+                self.assertAlmostEqual(slick.get_horizontal_distance(angle), distance,
+                                       delta=slick.DIST_ACCURACY)
+        tail: arrow.Arrow = arrow.Arrow()
+        still: float = tail.max_dist
+        tail.wind = 8.0
+        self.assertGreater(tail.max_dist, still, "a tailwind carries further, so the limit moves")
+
+    def test_the_limit_is_not_about_which_shot_you_asked_for(self) -> None:
+        '''With segments = 1, max_range() answers the rising crossing's own maximum - 7.4 m at
+        level ground - and that must not become the range of the question: auto falls back to the
+        falling crossing and says so, which is the whole design of segments.'''
+        rising: arrow.Arrow = arrow.Arrow()
+        rising.segments = 1
+        self.assertLess(rising.max_range(), 10., "the rising crossing's maximum is indeed tiny")
+        self.assertAlmostEqual(rising.max_dist, arrow.Arrow().max_dist, places=6)
+        self.assertIsNotNone(rising.get_angle(300.))
+
+    def test_the_limit_survives_answering_a_question(self) -> None:
+        '''Every answer writes hit_speed, hit_time, crossing, note and the rest. A cache that
+        those writes invalidated would re-derive on the next question and never hit - which is the
+        naive way to build this and costs 16 ms a question, so the same tuple must still be there
+        after the object has answered twice.'''
+        arw: arrow.Arrow = arrow.Arrow()
+        arw.get_angle(50.)
+        key: tuple[float, ...] | None = arw._far_key
+        self.assertIsNotNone(key)
+        arw.get_angle(120.)
+        arw.get_vertical_distance(0.5, 60.)
+        self.assertIs(arw._far_key, key, "answering must not re-derive the limit")
+
+    def test_a_setup_error_outranks_a_limit_the_setup_broke(self) -> None:
+        '''With a broken bow the derived limit is itself nonsense, so the setup check has to come
+        first or a broken arrow reports itself as a missed shot (BadInput is a setup error).'''
+        for name, value in (("ar_mass", -1.), ("wind", 400.), ("gravity_accel", 0.)):
+            arw: arrow.Arrow = arrow.Arrow()
+            setattr(arw, name, value)
+            with self.subTest(setting=name):
+                self.assertRaises(arrow.BadInput, arw.get_angle, 50.)
+
+    def test_an_imposed_limit_overrides_the_derived_one(self) -> None:
+        '''Setting a number is still allowed - it is how you keep a question inside your data -
+        and the refusal says which of the two numbers stopped you.'''
+        arw: arrow.Arrow = arrow.Arrow()
+        arw.max_dist = 100.
+        self.assertEqual(arw.max_dist, 100.)
+        with self.assertRaises(arrow.Unreachable) as ctx:
+            arw.get_angle(120.)
+        msg: str = str(ctx.exception)
+        self.assertIn("past the limit 100.0 m", msg)
+        self.assertIn("carries at most 617.7 m", msg, "the refusal names both numbers")
+        rising: arrow.Arrow = arrow.Arrow()
+        rising.segments = 1
+        rising.max_dist = 100.                        # an imposed ceiling, so the refusal is reached
+        with self.assertRaises(arrow.Unreachable) as ctx2:
+            rising.get_angle(120.)
+        self.assertIn("carries at most 617.7 m", str(ctx2.exception),
+                      "what the arrow carries is not what the rising crossing reaches (7.4 m)")
+        arw.max_dist = None
+        self.assertAlmostEqual(arw.max_dist, arrow.Arrow().max_dist, places=6)
+
+    def test_the_limit_never_borrows_the_search_s_marker(self) -> None:
+        '''`-1.` is `_safe_range`'s marker for "this angle never gets back to the sight line".
+        A target 500 m above the archer makes every angle do that, so a limit of -1 m would refuse
+        every question *and* state an impossible range - the failure SPINE remembers about
+        `closest -1.0 m`. The search itself has the true sentence, so the search must be the one
+        that speaks.'''
+        high: arrow.Arrow = arrow.Arrow()
+        high.archer_alt = -500.
+        self.assertLess(high.max_range(), 0., "the premise: the model says nothing carries")
+        self.assertTrue(math.isinf(high.max_dist), "no limit to state is not the same as -1 m")
+        with self.assertRaises(arrow.Unreachable) as ctx:
+            high.get_angle(300.)
+        self.assertNotIn("past the limit", str(ctx.exception))
+        self.assertNotIn("at most -1", str(ctx.exception), "the marker must not reach the reader")
+        steep: arrow.Arrow = arrow.Arrow()
+        steep.archer_alt = -500.
+        with self.assertRaises(arrow.Unreachable) as ctx2:
+            steep.steepest_angle(300.)
+        self.assertIn("no angle of this bow", str(ctx2.exception))
 
     def test_calibrate_recovers_the_drag(self) -> None:
         '''One chronograph reading must turn back into the drag_coef that made it.'''
@@ -563,7 +669,7 @@ class ArrowTestCases(unittest.TestCase):
             self.assertIn("too close for the lofted shot", str(ctx.exception))
         with self.assertRaises(arrow.Unreachable) as ctx:
             arrow.Arrow().steepest_angle(-5.)
-        self.assertIn("target_distance=-5.0", str(ctx.exception))
+        self.assertIn("-5 m is past the limit", str(ctx.exception))
         high: arrow.Arrow = arrow.Arrow()
         high.archer_alt = -500.                                   # a target 500 m above the archer
         with self.assertRaises(arrow.Unreachable) as ctx:

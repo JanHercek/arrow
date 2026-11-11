@@ -133,6 +133,9 @@ MAX_MARCH: t.Final[int] = 40            # bound on the launch-angle probes
 ANGLE_STEPS: t.Final[int] = 48          # bound on one branch refinement
 ANGLE_EPS: t.Final[float] = 1e-12       # rad, bracket collapse
 _CROSSING: t.Final[tuple[str, ...]] = ("", "rising", "falling", "lofted")   # indexed by segments
+FAR_STAMP: t.Final[tuple[str, ...]] = (            # the settings the far limit is remembered
+    "gravity_accel", "air_dens", "drag_coef", "ar_mass", "ar_launch_velo", "ar_dia",     # against
+    "ar_vane_n", "ar_vane_height", "ar_vane_thick", "wind", "archer_alt", "ar_launch_alt")
 
 
 # --- the REPL and the command line speak one grammar ------------------------------------
@@ -223,8 +226,9 @@ def help_text(arw: "Arrow") -> str:
         "                h                    this text",
         "                q                    quit",
         "",
-        (f"limits: {arw.min_dist:g} m to {arw.max_dist:g} m, angle open at +-pi/2; "
-         f"terminal speed {arw.terminal_speed():.1f} m/s, max range {arw.max_range():.0f} m."),
+        (f"questions are taken from {arw.min_dist:g} m to {arw.max_dist:g} m, the model's own "
+         f"maximum (set max_dist for a smaller limit); angle open at +-pi/2; "
+         f"terminal speed {arw.terminal_speed():.1f} m/s."),
         "The model is a point mass with quadratic drag, steady wind, flat target line: see the",
         "header of this file for the derivation and README.md for what it leaves out.",
     ])
@@ -418,7 +422,10 @@ class Arrow:
         self.ar_vane_n: int = 3                   # -, arrow vanes
         self.ar_launch_alt: float = -0.025        # m, distance from eye to arrow at launch
         self.min_dist: float = 0.01               # m, minimal distance to target
-        self.max_dist: float = 612.               # m, to target, MAG340 arrow can't go farther
+        # max_dist is a property: derived from the model unless a number is assigned to it.
+        self._far: float | None = None            # m, an imposed limit, or None to derive one
+        self._far_cache: float | None = None      # m, the derived limit, remembered
+        self._far_key: tuple[float, ...] | None = None   # settings that limit was derived at
         # aerodynamics:
         self.drag_coef: float = 0.4        # -, drag coefficient: shape+friction+induction
         self.air_dens: float = 1.225       # kg/m^3, air density
@@ -446,6 +453,19 @@ class Arrow:
         """sqrt(g/k): the speed this arrow falls at - the model's own drag yardstick."""
         k: float = self.drag_k()
         return math.sqrt(self.gravity_accel / k) if k > 0. else float("inf")
+
+    def _beyond(self, where: str, distance: float) -> Unreachable:
+        """The refusal for a distance the interface takes no question about.
+
+        It used to print `target_distance=700.0`, which told an archer nothing about what to ask
+        instead.  The limit is the model's own far limit now, so the message names both numbers a
+        reader could want: where asking stops, and how far this arrow can carry at all - the same
+        figure unless max_dist has been set by hand.
+        """
+        return Unreachable(
+            f"in {where}: {distance:g} m is past the limit {self.max_dist:.1f} m "
+            f"(this arrow carries at most {self._far_range():.1f} m at these settings; the nearest "
+            f"question the model takes is {self.min_dist:g} m)")
 
     def _check(self) -> None:
         if self.segments not in (0, 1, 2, 3):
@@ -593,8 +613,9 @@ class Arrow:
         get_vertical_distance(get_angle(d), x_wall) reads the height of the shot get_angle just
         reported over the wall at x_wall - which is the whole of what clearing a wall asks for.
         """
+        self._check()                                 # a broken bow is a setup error, first
         if not self.min_dist <= horizontal_distance <= self.max_dist:
-            raise Unreachable(f"in get_vertical_distance: {horizontal_distance=}")
+            raise self._beyond("get_vertical_distance", horizontal_distance)
         keep: int = self.segments
         self.segments = (self.crossing if self.crossing in (1, 2) else 2) if keep == 0 else keep
         try:
@@ -636,9 +657,9 @@ class Arrow:
         neither crossing can hit, and its message says what each one did. `segments` outside 0..3
         or a setup the air cannot support is `BadInput`, which is a setup error and not a miss.
         """
+        self._check()                                 # a broken bow is asked about before its range
         if not self.min_dist <= target_distance <= self.max_dist:
-            raise Unreachable(f"in get_angle: {target_distance=}")
-        self._check()
+            raise self._beyond("get_angle", target_distance)
         want: int = self.segments
         if want == 3:                                 # a different question of the same model
             return self._lofted_angle(target_distance)
@@ -707,9 +728,9 @@ class Arrow:
         an arrow fired at the model's vertical limit still lands past the target, so there is no
         lofted solution to be had there.
         """
-        if not self.min_dist <= target_distance <= self.max_dist:
-            raise Unreachable(f"in steepest_angle: {target_distance=}")
         self._check()                                 # setup errors, not misses
+        if not self.min_dist <= target_distance <= self.max_dist:
+            raise self._beyond("steepest_angle", target_distance)
         return self._lofted_angle(target_distance)
 
     def _lofted_angle(self, target_distance: float) -> float:
@@ -850,9 +871,9 @@ class Arrow:
         Every probe is one closed-form flight; probes are bounded by MAX_MARCH/ANGLE_STEPS;
         and an angle is returned only when the forward model agrees to DIST_ACCURACY.
         """
+        self._check()                                 # a broken bow is not a missed shot
         if not self.min_dist <= target_distance <= self.max_dist:
-            raise Unreachable(f"in get_angle: {target_distance=}")
-        self._check()
+            raise self._beyond("get_angle", target_distance)
         target_alt: float = -(self.archer_alt + self.ar_launch_alt)   # arrow to target, up +
         if self.segments == 1 and target_alt <= 0.:
             raise Unreachable("the rising crossing wants the arrow below the target "
@@ -1114,6 +1135,63 @@ class Arrow:
     def max_range(self) -> float:
         """The model's own maximum range from the archer's altitude, in meters."""
         return self._safe_range(self._peak_angle())
+
+    @property
+    def max_dist(self) -> float:
+        """The farthest distance the interface takes a question about, in meters.
+
+        Derived from the model - it used to be `612.`, a constant written down for the default
+        MAG340 arrow, which quietly became a lie for every other one: a slicker arrow (drag_coef
+        1.4e-3, or a calibrate() that lands there) carries 1091 m in this model and the constant
+        refused 700 m it could hit with room to spare.  The limit is `max_range()` itself now, so
+        nothing hittable is refused for the wrong reason and nothing beyond the possible is
+        missed: above it no angle exists by definition.  Between it and the last distance the
+        angle search can still verify inside DIST_ACCURACY (about 0.7% below it at the defaults,
+        where the range-angle curve is flattest) the search refuses and says which crossing failed
+        - the limit is the range of the question, not a promise that an answer exists.
+
+        Deriving it costs 40 closed-form flights (~16 ms) and the object reads it twice per
+        question, so it is remembered against FAR_STAMP: the twelve settings that move a
+        trajectory.  The read-back is deliberately not in that stamp - answering a question writes
+        hit_speed, crossing, note and the rest, and a cache invalidated by its own output is a
+        cache that never hits.  When the model cannot bring an arrow back to the sight line at any
+        angle (a target high above the archer) there is no far limit to state and it is `inf`, not
+        the search's `-1.` marker.  Assign a number to impose your own ceiling, or None to derive.
+        """
+        if self._far is not None:
+            return self._far
+        key: tuple[float, ...] = tuple(getattr(self, name) for name in FAR_STAMP)
+        if self._far_cache is None or self._far_key != key:
+            self._far_cache, self._far_key = self._far_range(), key
+        return self._far_cache
+
+    @max_dist.setter
+    def max_dist(self, limit: float | None) -> None:
+        self._far, self._far_cache, self._far_key = limit, None, None
+
+    def _far_range(self) -> float:
+        """`max_range()` with the crossing put back on auto, because the limit is not about shots.
+
+        `max_range()` answers the question `segments` is currently asking: with `segments = 1` it
+        returns the rising crossing's own maximum - 7.4 m for the default arrow at level ground -
+        and an archer who has asked for the rising shot is still entitled to *ask* about 300 m,
+        because auto falls back to the falling crossing and says so in the note. That fallback is
+        the whole design of `segments`, so the range of the question is the widest the model can
+        answer, whichever crossing ends up answering it.
+        """
+        keep: int = self.segments
+        self.segments = 0                             # type: ignore[assignment]
+        try:
+            far: float = self.max_range()
+        finally:
+            self.segments = keep                      # type: ignore[assignment]
+        # -1. is _safe_range's marker for "this angle never gets back to the sight line", and
+        # max_range() hands it back when *no* angle does - a target high above the archer. It is
+        # not a distance: a limit of -1 m would refuse every question with a sentence about a
+        # negative range while the search itself is left holding the true one ("at archer_alt -500
+        # m no angle of this bow brings an arrow to a target 300 m out"). Where the model cannot
+        # state a far limit, none is stated, and the entry points explain the setup instead.
+        return far if far > 0. else float("inf")
 
     def calibrate(self, distance: float, measured_speed: float) -> float:
         """Set drag_coef so the arrow passes `measured_speed` m/s at `distance` m.
