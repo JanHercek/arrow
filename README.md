@@ -150,7 +150,7 @@ answer and a `note:` line saying what you asked for and why it is not what you g
 
 ```
 $ ./arrow.py
-arrow.py(3.1.0):
+arrow.py(3.1.1):
 Angle[rad]=(-pi/2,+pi/2)  Distance[m]=(+0.01,+617.732)
 Segments=0|1|2|3 (0=auto, 3=lofted)  archer_aLt[m]  Wind[m/s, + = tail]  Q=Quit
 enter : [a=_] [d=_] [s=_] [l=_] [w=_] [h] [q] <Enter>
@@ -169,7 +169,7 @@ output: launch angle [rad]   = 0.8103
         hit_y [m]            = 0.000
         apex [m]             = 0.000
 
-arrow.py(3.1.0):
+arrow.py(3.1.1):
 Angle[rad]=(-pi/2,+pi/2)  Distance[m]=(+0.01,+617.732)
 Segments=0|1|2|3 (0=auto, 3=lofted)  archer_aLt[m]  Wind[m/s, + = tail]  Q=Quit
 enter : [a=_] [d=_] [s=_] [l=_] [w=_] [h] [q] <Enter>
@@ -484,10 +484,10 @@ came back within **0.023 m**, inside the model's own acceptance of `DIST_ACCURAC
 | 500 m | 0.371725 rad (21.30 deg) | 500.000 m | 64.31 m/s | 46.9 J | 6.858 s | 58.07 m |
 | 612 m | 0.632078 rad (36.22 deg) | 612.022 m | 62.10 m/s | 43.7 J | 10.639 s | 140.11 m |
 
-**Arrows.** The model was shot, by the author: many arrows at 5 m to 50 m against the 2.x program
-— same equations, marched rather than closed-form. It agreed. One shooter, short range, nothing
-logged. At those distances a 10% error in `drag_coef` is worth 0.2 m; at 200 m, 2.6 m; at 400 m,
-10 m. So the shooting rules out a gross error and proves little about drag. For the long end,
+**Arrows.** The model was shot, by the author, at 5 m to 50 m against the 2.x program — same
+equations, marched rather than closed-form. It agreed. One shooter, short range, nothing logged. At
+those distances a 10% error in `drag_coef` is worth 0.2 m; at 200 m, 2.6 m; at 400 m, 10 m. So the
+shooting rules out a gross error and proves little about drag. For the long end,
 [`calibrate()`](#calibration).
 
 ---
@@ -849,7 +849,7 @@ code rather than about archery.
 
 ## Version
 
-**3.1.0** — the other shot at the target:
+**3.1.1** — the first published version: the other shot at the target:
 
 - **`steepest_angle(distance)`, and `segments = 3`, give the lofted route.** Anything hittable can
   be hit flat or lofted, and `get_angle` only ever returned the flat one; for a target level with
@@ -872,6 +872,10 @@ code rather than about archery.
   model cannot bring an arrow back to the sight line at all, the limit is `inf` rather than the
   search's `-1.` marker, so the search keeps the sentence that explains the setup.
 - **AGPL-3.0-or-later**, canonical text in `LICENSE`, SPDX line in both Python files.
+- **The Accuracy section says what was checked.** "Measured" is reserved here for a physical
+  measurement — the chronograph reading `calibrate()` takes. What that section holds is two checks:
+  an independent RK4 march against the closed form, and the author's shooting at 5 m to 50 m against
+  the 2.x program, with the numbers that bound what the shooting proves.
 - **The read-back is renamed, because `final_*` was lying.** `final_x` and `final_t` were filled at
   whatever point the call had been asked about — asking how high the arrow is at 120 m on a shot
   that lands at 574 m left `final_x` at 120 — so the family is now `hit_x`, `hit_y`, `hit_speed`,
@@ -900,13 +904,13 @@ code rather than about archery.
   so typing the familiar form produced `could not convert string to float: '=50'`. One parser, one
   settings application, both interfaces, and a nonsense token now names itself.
 - **The REPL answers in the order it is asked**: what you typed, then what the arrow is set to, then
-  the answer, then the numbers of that shot, with `final_s` first among them because it says which
+  the answer, then the numbers of that shot, with `crossing` first among them because it says which
   shot the rest describe. Settings used to be printed after the answer they produced.
-- **`max_h` replaces `final_h`**: the highest point of the arc is not a quantity at the end of the
-  flight, and calling it `final_*` invited exactly the wrong reading. `final_h` survived as a
-  read-only property until 3.1.0 removed it.
+- **One name for the top of the arc: `apex`.** It is not a quantity at the end of the flight, so
+  `final_*` was the wrong family for it. The read-backs that carried it during development
+  (`final_h`, then `max_h`) are gone, and a test fails if a second name for one arc comes back.
 - **A forward call now follows the crossing that answered.** `get_horizontal_distance` and
-  `get_vertical_distance` with `segments = 0` use `final_s`, so re-checking the angle `get_angle`
+  `get_vertical_distance` with `segments = 0` use `crossing`, so re-checking the angle `get_angle`
   just returned measures that shot instead of the other half of the arc. With no shot asked for
   yet they use the falling crossing, as before. Setting `segments` explicitly still means it.
 - **A search probe past the vertical guard is a refusal, not a setup error.** Asking for a target
@@ -944,7 +948,7 @@ LICENSE
 
 One module, no package, no dependencies, no build. `arrow.py` is self-contained: nothing outside
 the file is needed to import it, run it or trust it; `arrow_test.py` needs only it and the
-standard library. `VERSION` in the file is the version of the model and solver (`3.1.0`); the
+standard library. `VERSION` in the file is the version of the model and solver (`3.1.1`); the
 header docstring is the derivation, and every claim in it is one you can check with the commands
 above.
 
