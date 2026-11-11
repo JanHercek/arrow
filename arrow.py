@@ -76,7 +76,7 @@ Point mass, constant g, quadratic drag always opposite the velocity:
 import math
 import typing as t
 
-VERSION = "3.1.1"
+VERSION = "3.1.0"
 
 
 class Unreachable(ValueError):

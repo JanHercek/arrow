@@ -150,7 +150,7 @@ answer and a `note:` line saying what you asked for and why it is not what you g
 
 ```
 $ ./arrow.py
-arrow.py(3.1.1):
+arrow.py(3.1.0):
 Angle[rad]=(-pi/2,+pi/2)  Distance[m]=(+0.01,+617.732)
 Segments=0|1|2|3 (0=auto, 3=lofted)  archer_aLt[m]  Wind[m/s, + = tail]  Q=Quit
 enter : [a=_] [d=_] [s=_] [l=_] [w=_] [h] [q] <Enter>
@@ -169,7 +169,7 @@ output: launch angle [rad]   = 0.8103
         hit_y [m]            = 0.000
         apex [m]             = 0.000
 
-arrow.py(3.1.1):
+arrow.py(3.1.0):
 Angle[rad]=(-pi/2,+pi/2)  Distance[m]=(+0.01,+617.732)
 Segments=0|1|2|3 (0=auto, 3=lofted)  archer_aLt[m]  Wind[m/s, + = tail]  Q=Quit
 enter : [a=_] [d=_] [s=_] [l=_] [w=_] [h] [q] <Enter>
@@ -849,7 +849,7 @@ code rather than about archery.
 
 ## Version
 
-**3.1.1** — the first published version: the other shot at the target:
+**3.1.0** — the other shot at the target:
 
 - **`steepest_angle(distance)`, and `segments = 3`, give the lofted route.** Anything hittable can
   be hit flat or lofted, and `get_angle` only ever returned the flat one; for a target level with
@@ -948,7 +948,7 @@ LICENSE
 
 One module, no package, no dependencies, no build. `arrow.py` is self-contained: nothing outside
 the file is needed to import it, run it or trust it; `arrow_test.py` needs only it and the
-standard library. `VERSION` in the file is the version of the model and solver (`3.1.1`); the
+standard library. `VERSION` in the file is the version of the model and solver (`3.1.0`); the
 header docstring is the derivation, and every claim in it is one you can check with the commands
 above.
 
