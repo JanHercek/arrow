@@ -6,7 +6,8 @@ returns how far high or low the arrow arrives. It also reports impact speed, kin
 time of flight, impact angle and trajectory height.
 
 The whole solver is **one file, standard library only, and it never steps through time**. Every
-number below was produced by running this file, not copied from a textbook.
+number below was produced by running this file, not copied from a textbook. What was checked, and
+how, is in [Accuracy](#accuracy--two-checks).
 
 ```
 $ python3 arrow.py d=50
@@ -35,7 +36,7 @@ arrived, `hit_time` how long it took, `hit_angle` at what angle, `apex` the top 
 - [Quick start](#quick-start)
 - [The model](#the-model)
 - [Which crossing the arrow takes](#which-crossing-the-arrow-takes)
-- [Accuracy — measured](#accuracy--measured)
+- [Accuracy — two checks](#accuracy--two-checks)
 - [Library API](#library-api)
 - [Worked numbers](#worked-numbers)
 - [What the model does not do](#what-the-model-does-not-do)
@@ -264,7 +265,7 @@ t     = (1/g) Int sqrt(P) cosh(u) du
 
 with the analytic derivatives `dx/du = -P cosh(u)/g`, `dy/du = -P sinh(u) cosh(u)/g` that root
 finding uses. Setting `k = 0` collapses these to the textbook vacuum formulas term by term
-(measured agreement below), and the drag coefficient, mass, diameter and vane area of a real
+(the agreement is checked below), and the drag coefficient, mass, diameter and vane area of a real
 arrow enter through `k` alone.
 
 **Wind.** A steady wind is a Galilean shift. The flight is solved in the air frame from the
@@ -306,7 +307,7 @@ arrows and saying which is the whole point.
 level with the arrow sits on the *same* crossing as the flat one — which is exactly why `1` and `2`
 cannot reach it. See [Shooting over a wall](#shooting-over-a-wall).
 
-Auto picks the rising crossing first because measurement says that is the quick arrow, not the
+Auto picks the rising crossing first because the arithmetic says that is the quick arrow, not the
 steep one. Of the 120 geometries tried — archer altitudes from 200 m below the target to 300 m
 above it, targets 1 m to 612 m out — 29 have both crossings, and in every one of those 29 the
 rising shot is the flatter **and** the faster:
@@ -437,11 +438,12 @@ Two more things worth knowing:
 
 ---
 
-## Accuracy — measured
+## Accuracy — two checks
 
-The closed form was cross-checked against an independent fixed-step RK4 integration of the
-equations above, written from the ODE alone (drag computed from the *relative* velocity, so it
-does not share the Galilean-shift trick). Same event, the crossing of the sight line.
+**Second solver.** The closed form against an independent fixed-step RK4, written from the ODE
+alone — drag from the relative velocity, so no shared trick. Same event: the crossing of the sight
+line. They agree to better than 1e-9 of the distance on every shot below, to ~1e-15 on the easy
+ones. Arithmetic agreeing with arithmetic.
 
 | shot | quantity | this model | independent RK4 | difference |
 |---|---|---|---|---|
@@ -481,6 +483,12 @@ came back within **0.023 m**, inside the model's own acceptance of `DIST_ACCURAC
 | 400 m | 0.258893 rad (14.83 deg) | 400.001 m | 69.46 m/s | 54.7 J | 4.971 s | 30.43 m |
 | 500 m | 0.371725 rad (21.30 deg) | 500.000 m | 64.31 m/s | 46.9 J | 6.858 s | 58.07 m |
 | 612 m | 0.632078 rad (36.22 deg) | 612.022 m | 62.10 m/s | 43.7 J | 10.639 s | 140.11 m |
+
+**Arrows.** The model was shot, by the author: many arrows at 5 m to 50 m against the 2.x program
+— same equations, marched rather than closed-form. It agreed. One shooter, short range, nothing
+logged. At those distances a 10% error in `drag_coef` is worth 0.2 m; at 200 m, 2.6 m; at 400 m,
+10 m. So the shooting rules out a gross error and proves little about drag. For the long end,
+[`calibrate()`](#calibration).
 
 ---
 
@@ -706,9 +714,11 @@ Honest limits of the equations being solved:
 ## The numerical contract
 
 Every search is bounded by a named constant, so no question can make it spin.
-Measured cost of the whole solve on this host (CPython 3.14.4): an auto `get_angle` at level
-ground costs **1.50 ms** at 50 m and 1.90 ms at 300 m, and a target above the archer — where the
-rising search is the one that answers — 12.51 ms.
+Timed on this host (CPython 3.14.4, median of 200 calls, one machine, not a property of the
+model): an auto `get_angle` costs **1.6 ms** at 50 m and **2.1 ms** at 300 m on level ground; a
+target 50 m above the archer at 120 m costs **47 ms**, because auto solves both crossings there and
+the long one is a 16-second flight; the lofted route, **42 ms** warm and 76 ms cold. The whole
+command, interpreter start-up included, is **53 ms**.
 
 | constant | value | what it bounds |
 |---|---|---|
@@ -819,12 +829,12 @@ could only ever pass.
 ### The numbers in the tables
 
 Tables and prose are not code blocks, so the block checker above skips them — and they carry the
-numbers a reader actually quotes. `test/check_crossings.py` re-measures every one of them in
+numbers a reader actually quotes. `test/check_crossings.py` recomputes every one of them in
 [Which crossing the arrow takes](#which-crossing-the-arrow-takes): the level-target table, the
 7.399 m hand-over, the flatter-and-faster claim over all 120 geometries, all 243 answers of the
 nine-altitudes-by-nine-distances-by-three-settings sweep against the independent RK4 march, and
 the lofted twin — found by bisection on the forward model at every distance from 1 m to 612 m, so
-that the numbers in the section above are measured rather than remembered. About a minute, exit 0 means
+that the numbers in the section above are recomputed rather than remembered. About a minute, exit 0 means
 `0 claims broken - the README's crossing section holds`:
 
     python3 test/check_crossings.py
@@ -917,8 +927,8 @@ Gauss-Legendre quadrature, and every loop bounded.
 
 **2.x** — the same physics, marched: a fixed Euler loop over flight time, with the launch angle
 found by stepping through angles until the distance came out right. Same model and same answers,
-about **15× slower** than the closed form on this host. The factor is the author's measurement of
-the 2.x code, which is not in this repository and so is reported here rather than re-measured; the
+about **15× slower** than the closed form on this host. The factor is the author's own timing of
+the 2.x code, which is not in this repository and so is reported here rather than recomputed; the
 3.0 rewrite replaced the march with the first integral and nothing of 2.x survives in the file.
 
 ---

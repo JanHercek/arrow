@@ -643,7 +643,7 @@ class Arrow:
         `segments` says which one is wanted and `crossing` says which one answered:
 
             0  the fastest route to the target - the rising crossing whenever it can reach, and
-               the falling one otherwise.  Measurement, not taste: in every geometry where both
+               the falling one otherwise.  Arithmetic, not taste: in every geometry where both
                answer (29 of 29 tried) the rising shot is the flatter and far faster one.
             1  the rising crossing; when it cannot reach, the falling one, with note saying
                so.  This is the long-distance case: the flat shot simply stops short.
